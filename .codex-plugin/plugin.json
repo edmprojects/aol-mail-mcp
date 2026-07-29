@@ -1,0 +1,26 @@
+{
+  "name": "aol-mail",
+  "version": "0.1.0+codex.20260729183742",
+  "description": "Safely review unread AOL mail with Codex through a local read-only MCP server.",
+  "author": {
+    "name": "Ethan Millstein"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "AOL Mail",
+    "shortDescription": "Review unread AOL mail safely with Codex.",
+    "longDescription": "Read-only AOL inbox access, resumable Codex classifications, and approval-gated Report Spam logging.",
+    "developerName": "Ethan Millstein",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Review my next unread AOL batch.",
+      "Show pending AOL spam candidates.",
+      "Export my AOL spam action log."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

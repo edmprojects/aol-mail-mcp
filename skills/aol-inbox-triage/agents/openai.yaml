@@ -1,0 +1,4 @@
+interface:
+  display_name: "AOL Inbox Triage"
+  short_description: "Safely classify unread AOL mail with Codex"
+  default_prompt: "Use $aol-inbox-triage to review my unread AOL inbox conservatively."

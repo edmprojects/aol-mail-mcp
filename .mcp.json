@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aol-mail": {
+      "command": "node",
+      "args": ["build/src/index.js"],
+      "cwd": "."
+    }
+  }
+}
