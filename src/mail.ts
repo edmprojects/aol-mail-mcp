@@ -1,6 +1,6 @@
 import { ImapFlow } from "imapflow";
 import { accountIdentifier, loadConfig, loadKeychainPassword } from "./config.js";
-import { parseMessage } from "./message.js";
+import { extractUnsubscribe, parseMessage } from "./message.js";
 import type { MailboxScope, MailSearch, MailCriteriaSearch, MessageDetails, MessageSummary, AttachmentMetadata } from "./types.js";
 
 export interface MailboxSnapshot {
@@ -10,6 +10,7 @@ export interface MailboxSnapshot {
 
 export interface MailGateway {
   listMailboxes(): Promise<string[]>;
+  listMailboxDetails(): Promise<Array<{ path: string; specialUse: string | null; specialUseSource: string | null }>>;
   snapshot(): Promise<MailboxSnapshot>;
   searchMessages(query: MailSearch): Promise<{
     scope: MailboxScope;
@@ -20,6 +21,15 @@ export interface MailGateway {
     scope: MailboxScope;
     messages: MessageSummary[];
     nextBeforeUid: number | null;
+  }>;
+  listRecent(mailbox: string, limit: number, beforeUid?: number, since?: string): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
+    nextBeforeUid: number | null;
+  }>;
+  findMessageId(mailbox: string, messageId: string): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
   }>;
   fetchMessageDetails(uid: number, mailbox?: string): Promise<{
     scope: MailboxScope;
@@ -41,7 +51,7 @@ export interface MailGateway {
 
 interface ReadOnlyImapClient {
   connect(): Promise<void>;
-  list(): Promise<Array<{ path: string; flags: Set<string> }>>;
+  list(): Promise<Array<{ path: string; flags: Set<string>; specialUse?: string; specialUseSource?: string }>>;
   mailboxOpen(
     path: string,
     options: { readOnly: boolean },
@@ -49,6 +59,8 @@ interface ReadOnlyImapClient {
   search(
     query: {
       uid?: string;
+      all?: boolean;
+      header?: Record<string, string>;
       seen?: boolean;
       from?: string;
       subject?: string;
@@ -152,6 +164,10 @@ export class AolImapGateway implements MailGateway {
   }
 
   async listMailboxes(): Promise<string[]> {
+    return (await this.listMailboxDetails()).map((folder) => folder.path);
+  }
+
+  async listMailboxDetails(): Promise<Array<{ path: string; specialUse: string | null; specialUseSource: string | null }>> {
     const { account } = await this.dependencies.loadAccount();
     const password = await this.dependencies.loadPassword(account);
     const client = this.dependencies.createClient(account, password);
@@ -160,7 +176,11 @@ export class AolImapGateway implements MailGateway {
       const folders = await client.list();
       return folders
         .filter((folder) => !folder.flags.has("\\Noselect"))
-        .map((folder) => folder.path);
+        .map((folder) => ({
+          path: folder.path,
+          specialUse: folder.specialUse ?? null,
+          specialUseSource: folder.specialUseSource ?? null,
+        }));
     } catch {
       throw new Error("AOL IMAP operation failed. Verify the app password and account configuration.");
     } finally {
@@ -195,6 +215,39 @@ export class AolImapGateway implements MailGateway {
       beforeUid: query.beforeUid,
       limit: query.limit,
     });
+  }
+
+  async listRecent(mailbox: string, limit: number, beforeUid?: number, since?: string): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
+    nextBeforeUid: number | null;
+  }> {
+    return this.withMailbox(async (client, scope) => {
+      if (beforeUid === 1) return { scope, messages: [], nextBeforeUid: null };
+      const result = await client.search({
+        all: true,
+        ...(beforeUid && { uid: `1:${beforeUid - 1}` }),
+        ...(since && { since }),
+      }, { uid: true });
+      const uids = (result === false ? [] : result).sort((a, b) => b - a).slice(0, limit);
+      return {
+        scope,
+        messages: await this.fetchSources(client, uids, 500, 32768),
+        nextBeforeUid: uids.at(-1) ?? null,
+      };
+    }, mailbox);
+  }
+
+  async findMessageId(mailbox: string, messageId: string): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
+  }> {
+    return this.withMailbox(async (client, scope) => {
+      const result = await client.search({ header: { "Message-ID": messageId } }, { uid: true });
+      const uids = (result === false ? [] : result).sort((a, b) => b - a).slice(0, 10);
+      const messages = await this.fetchSources(client, uids, 500, 32768);
+      return { scope, messages: messages.filter((message) => message.messageId === messageId) };
+    }, mailbox);
   }
 
   async searchMailbox(query: MailCriteriaSearch): Promise<{
@@ -245,6 +298,7 @@ export class AolImapGateway implements MailGateway {
           ...summary,
           attachments: attachmentMetadata(fetched.bodyStructure),
           sourceTruncated: fetched.size === undefined ? null : fetched.size > fetched.source.length,
+          unsubscribe: extractUnsubscribe(fetched.source),
         },
       };
     }, mailbox);

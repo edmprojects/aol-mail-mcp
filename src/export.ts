@@ -47,6 +47,24 @@ function eventRow(event: ActionEvent): Record<string, unknown> {
       source: "codex",
     };
   }
+  if (event.type === "spam_review") {
+    return {
+      event_type: event.type,
+      recorded_at: event.recordedAt,
+      key: event.key,
+      uid: event.message.uid,
+      sender: event.message.sender,
+      sender_address: event.message.senderAddress,
+      subject: event.message.subject,
+      message_date: event.message.date,
+      label: event.verdict,
+      confidence: "",
+      reason: event.note,
+      status: "",
+      detail: "",
+      source: "codex",
+    };
+  }
   return {
     event_type: event.type,
     recorded_at: event.recordedAt,

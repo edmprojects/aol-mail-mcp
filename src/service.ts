@@ -72,6 +72,68 @@ export class AolMailService {
     return { mailboxes: await this.gateway.listMailboxes() };
   }
 
+  async listMailboxDetails(): Promise<Record<string, unknown>> {
+    return { mailboxes: await this.gateway.listMailboxDetails() };
+  }
+
+  async reviewSpamFolder(mailbox: string, limit = 25, beforeUid?: number): Promise<Record<string, unknown>> {
+    const page = await this.gateway.listRecent(mailbox, limit, beforeUid);
+    await this.state.load();
+    const reportedIds = new Set(this.state.reportedMessages(page.scope.accountId)
+      .map(({ message }) => message.messageId).filter(Boolean));
+    return {
+      ...page,
+      messages: page.messages.map((message) => ({
+        ...message,
+        locallyReported: Boolean(message.messageId && reportedIds.has(message.messageId)),
+        review: this.state.spamReview(page.scope, message.uid)?.verdict ?? null,
+      })),
+    };
+  }
+
+  async saveSpamReview(
+    mailbox: string,
+    uid: number,
+    verdict: "spam" | "false_positive" | "uncertain",
+    note: string,
+  ): Promise<Record<string, unknown>> {
+    if (mailbox === "INBOX") throw new Error("Choose a Spam folder message.");
+    const fetched = await this.gateway.fetchMessage(uid, 500, mailbox);
+    return { review: await this.state.saveSpamReview(fetched.scope, fetched.message, verdict, note) };
+  }
+
+  async senderGroups(mailbox: string, limit = 100, beforeUid?: number, since?: string): Promise<Record<string, unknown>> {
+    const page = await this.gateway.listRecent(mailbox, limit, beforeUid, since);
+    const groups = new Map<string, { count: number; latestDate: string; subjects: string[]; uids: number[] }>();
+    for (const message of page.messages) {
+      const address = message.senderAddress.trim().toLowerCase();
+      if (!address) continue;
+      const group = groups.get(address) ?? { count: 0, latestDate: message.date, subjects: [], uids: [] };
+      group.count++;
+      if (message.date > group.latestDate) group.latestDate = message.date;
+      if (group.subjects.length < 3 && !group.subjects.includes(message.subject)) group.subjects.push(message.subject);
+      group.uids.push(message.uid);
+      groups.set(address, group);
+    }
+    return {
+      scope: page.scope,
+      sampled: page.messages.length,
+      nextBeforeUid: page.nextBeforeUid,
+      groups: [...groups.entries()].map(([senderAddress, group]) => ({ senderAddress, ...group }))
+        .sort((a, b) => b.count - a.count || a.senderAddress.localeCompare(b.senderAddress)),
+    };
+  }
+
+  async filterRecommendations(minimumSpam = 3): Promise<Record<string, unknown>> {
+    const snapshot = await this.gateway.snapshot();
+    await this.state.load();
+    return {
+      scope: snapshot.scope,
+      basis: "Current Inbox's local Codex classifications only; no AOL filter has been created.",
+      recommendations: this.state.filterRecommendations(snapshot.scope, minimumSpam),
+    };
+  }
+
   async getAnyMessage(uid: number, mailbox?: string): Promise<Record<string, unknown>> {
     const fetched = await this.gateway.fetchMessage(uid, 12000, mailbox);
     return { scope: fetched.scope, message: fetched.message };
@@ -183,6 +245,63 @@ export class AolMailService {
     return {
       scope: snapshot.scope,
       candidates: this.state.candidates(snapshot.scope, beforeUid, limit, uids),
+    };
+  }
+
+  async prepareSpamReports(keys: string[]): Promise<Record<string, unknown>> {
+    const snapshot = await this.gateway.snapshot();
+    await this.state.load();
+    const candidates = [];
+    for (const key of keys) {
+      const candidate = this.state.candidateByKey(key);
+      if (!candidate || key !== messageKey(snapshot.scope, candidate.uid)) {
+        throw new Error(`Unknown current Inbox spam candidate: ${key}`);
+      }
+      try {
+        const fetched = await this.gateway.fetchMessage(candidate.uid, 500);
+        const matches = Boolean(candidate.messageId) &&
+          fetched.scope.uidValidity === snapshot.scope.uidValidity &&
+          fetched.message.messageId === candidate.messageId &&
+          fetched.message.senderAddress === candidate.senderAddress &&
+          fetched.message.subject === candidate.subject &&
+          fetched.message.date === candidate.date;
+        candidates.push({ ...candidate, ready: matches, note: matches ? "" : "Inbox message changed or UID was reused." });
+      } catch {
+        candidates.push({ ...candidate, ready: false, note: "Message is no longer accessible in Inbox." });
+      }
+    }
+    return { scope: snapshot.scope, candidates };
+  }
+
+  async verifySpamReports(keys: string[], spamMailbox: string): Promise<Record<string, unknown>> {
+    if (spamMailbox === "INBOX") throw new Error("Choose the verified AOL Spam mailbox.");
+    const snapshot = await this.gateway.snapshot();
+    await this.state.load();
+    const results = [];
+    for (const key of keys) {
+      const candidate = this.state.candidateByKey(key);
+      if (!candidate || key !== messageKey(snapshot.scope, candidate.uid) || !candidate.messageId) {
+        throw new Error(`Unknown current Inbox spam candidate with Message-ID: ${key}`);
+      }
+      const [inbox, spam] = await Promise.all([
+        this.gateway.findMessageId("INBOX", candidate.messageId),
+        this.gateway.findMessageId(spamMailbox, candidate.messageId),
+      ]);
+      const inInbox = inbox.messages.length > 0;
+      const spamMatches = spam.messages.filter((message) =>
+        message.senderAddress === candidate.senderAddress &&
+        message.subject === candidate.subject && message.date === candidate.date);
+      results.push({
+        key,
+        verified: !inInbox && spamMatches.length === 1,
+        inInbox,
+        spamUids: spamMatches.map((message) => message.uid),
+      });
+    }
+    return {
+      spamMailbox,
+      results,
+      note: "IMAP location confirms the move, not whether AOL's native Report Spam button was used. Record that action only after visible Webmail confirmation.",
     };
   }
 

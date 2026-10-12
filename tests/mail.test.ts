@@ -198,3 +198,41 @@ test("searches read mail and fetches an exact message without changing flags", a
     /IMAP operation failed/,
   );
 });
+
+test("lists Spam identity and searches Message-ID in a read-only folder", async () => {
+  const calls: Array<{ name: string; value: unknown }> = [];
+  const source = Buffer.from(
+    "Message-ID: <abc@example.com>\r\nFrom: sender@example.com\r\nSubject: Offer\r\n\r\nText",
+  );
+  const client = {
+    async connect() {},
+    async list() { return [
+      { path: "INBOX", flags: new Set<string>() },
+      { path: "Bulk Mail", flags: new Set<string>(), specialUse: "\\Junk", specialUseSource: "extension" },
+    ]; },
+    async mailboxOpen(path: string, options: { readOnly: boolean }) {
+      calls.push({ name: "open", value: { path, options } });
+      return { readOnly: true, uidValidity: 5n };
+    },
+    async search(query: unknown) { calls.push({ name: "search", value: query }); return [2]; },
+    async fetchOne() { return { source }; },
+    async logout() {},
+    close() {},
+  };
+  const gateway = new AolImapGateway({
+    loadAccount: async () => ({ account: "old@example.com" }),
+    loadPassword: async () => "secret",
+    createClient: () => client,
+  });
+  const folders = await gateway.listMailboxDetails();
+  assert.deepEqual(folders[1], { path: "Bulk Mail", specialUse: "\\Junk", specialUseSource: "extension" });
+  const recent = await gateway.listRecent("Bulk Mail", 1);
+  assert.equal(recent.messages[0]?.messageId, "<abc@example.com>");
+  assert.deepEqual(calls.find((call) => call.name === "search")?.value, { all: true });
+  const found = await gateway.findMessageId("Bulk Mail", "<abc@example.com>");
+  assert.equal(found.messages.length, 1);
+  assert.deepEqual(calls.filter((call) => call.name === "search").at(-1)?.value,
+    { header: { "Message-ID": "<abc@example.com>" } });
+  assert.equal(calls.filter((call) => call.name === "open").every((call) =>
+    (call.value as { options: { readOnly: boolean } }).options.readOnly), true);
+});

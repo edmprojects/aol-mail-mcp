@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { htmlToText, parseMessage } from "../src/message.js";
+import { extractUnsubscribe, htmlToText, parseMessage } from "../src/message.js";
+
+test("extracts only explicit unsubscribe headers without acting on links", () => {
+  const source = Buffer.from(
+    "From: news@example.com\r\n" +
+    "List-Unsubscribe: <mailto:leave@example.com>,\r\n\t<https://example.com/u/123>, <http://insecure.example/u>\r\n" +
+    "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n\r\n" +
+    "Body with https://other.example/unsubscribe",
+  );
+  assert.deepEqual(extractUnsubscribe(source), {
+    mailto: ["mailto:leave@example.com"],
+    urls: ["https://example.com/u/123"],
+    oneClick: true,
+  });
+});
 
 test("parses unicode plain text and tolerates missing optional headers", async () => {
   const source = Buffer.from(

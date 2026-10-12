@@ -1,6 +1,23 @@
 import { simpleParser } from "mailparser";
 import type { MessageSummary } from "./types.js";
 
+export function extractUnsubscribe(source: Buffer): {
+  mailto: string[];
+  urls: string[];
+  oneClick: boolean;
+} {
+  const header = source.toString("latin1").split(/\r?\n\r?\n/, 1)[0] ?? "";
+  const lines = header.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/);
+  const value = lines.find((line) => /^list-unsubscribe:/i.test(line))?.replace(/^[^:]+:\s*/, "") ?? "";
+  const post = lines.find((line) => /^list-unsubscribe-post:/i.test(line)) ?? "";
+  const targets = [...value.matchAll(/<([^<>]+)>/g)].map((match) => match[1]!.trim());
+  return {
+    mailto: targets.filter((target) => /^mailto:/i.test(target)).slice(0, 10),
+    urls: targets.filter((target) => /^https:\/\//i.test(target)).slice(0, 10),
+    oneClick: /List-Unsubscribe=One-Click/i.test(post),
+  };
+}
+
 function collapseWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }

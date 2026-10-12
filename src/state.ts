@@ -14,6 +14,7 @@ import type {
   ReportStatus,
   ResearchKind,
   ResearchRecord,
+  SpamReviewEvent,
   StateEvent,
 } from "./types.js";
 
@@ -28,6 +29,7 @@ export class StateStore {
   private readonly reports = new Map<string, ReportEvent>();
   private readonly legacyReports: LegacyReportEvent[] = [];
   private readonly research = new Map<string, ResearchRecord>();
+  private readonly spamReviews = new Map<string, SpamReviewEvent>();
 
   constructor(private readonly path: string) {}
 
@@ -48,6 +50,7 @@ export class StateStore {
     this.reports.clear();
     this.legacyReports.length = 0;
     this.research.clear();
+    this.spamReviews.clear();
     let content = "";
     try {
       content = await readFile(this.path, "utf8");
@@ -182,6 +185,8 @@ export class StateStore {
       this.reports.set(event.key, event);
     } else if (event.type === "research_record") {
       this.research.set(event.key, event);
+    } else if (event.type === "spam_review") {
+      this.spamReviews.set(event.key, event);
     } else if (
       !this.legacyReports.some((existing) => existing.eventId === event.eventId)
     ) {
@@ -357,6 +362,7 @@ export class StateStore {
       .map((event) => ({
         key: event.key,
         uid: event.message.uid,
+        messageId: event.message.messageId,
         sender: event.message.sender,
         senderAddress: event.message.senderAddress,
         subject: event.message.subject,
@@ -364,6 +370,89 @@ export class StateStore {
         confidence: event.confidence,
         reason: event.reason,
       }));
+  }
+
+  candidateByKey(key: string): Candidate | undefined {
+    const event = this.classifications.get(key);
+    if (!event || event.label !== "spam") return undefined;
+    return {
+      key,
+      uid: event.message.uid,
+      messageId: event.message.messageId,
+      sender: event.message.sender,
+      senderAddress: event.message.senderAddress,
+      subject: event.message.subject,
+      date: event.message.date,
+      confidence: event.confidence,
+      reason: event.reason,
+    };
+  }
+
+  reportedMessages(accountId: string): Array<{ key: string; message: MessageSummary }> {
+    return [...this.reports.values()]
+      .filter((report) => report.status === "reported")
+      .flatMap((report) => {
+        const classification = this.classifications.get(report.key);
+        return classification?.scope.accountId === accountId
+          ? [{ key: report.key, message: classification.message }] : [];
+      });
+  }
+
+  spamReview(scope: MailboxScope, uid: number): SpamReviewEvent | undefined {
+    return this.spamReviews.get(messageKey(scope, uid));
+  }
+
+  async saveSpamReview(
+    scope: MailboxScope,
+    message: MessageSummary,
+    verdict: SpamReviewEvent["verdict"],
+    note: string,
+  ): Promise<SpamReviewEvent> {
+    return this.withLock(async () => {
+      await this.loadUnlocked();
+      const event: SpamReviewEvent = {
+        type: "spam_review",
+        eventId: randomUUID(),
+        recordedAt: new Date().toISOString(),
+        key: messageKey(scope, message.uid),
+        scope,
+        message,
+        verdict,
+        note,
+      };
+      await this.appendUnlocked([event]);
+      return event;
+    });
+  }
+
+  filterRecommendations(scope: MailboxScope, minimumSpam: number): Array<{
+    senderAddress: string;
+    spamCount: number;
+    otherCount: number;
+    exampleSubjects: string[];
+  }> {
+    const groups = new Map<string, { spamCount: number; otherCount: number; exampleSubjects: string[] }>();
+    for (const event of this.classifications.values()) {
+      if (event.scope.accountId !== scope.accountId ||
+          event.scope.mailbox !== scope.mailbox ||
+          event.scope.uidValidity !== scope.uidValidity) continue;
+      const address = event.message.senderAddress.trim().toLowerCase();
+      if (!address) continue;
+      const group = groups.get(address) ?? { spamCount: 0, otherCount: 0, exampleSubjects: [] };
+      if (event.label === "spam") {
+        group.spamCount++;
+        if (group.exampleSubjects.length < 3 && !group.exampleSubjects.includes(event.message.subject)) {
+          group.exampleSubjects.push(event.message.subject);
+        }
+      } else {
+        group.otherCount++;
+      }
+      groups.set(address, group);
+    }
+    return [...groups.entries()]
+      .filter(([, group]) => group.spamCount >= minimumSpam)
+      .map(([senderAddress, group]) => ({ senderAddress, ...group }))
+      .sort((a, b) => b.spamCount - a.spamCount || a.senderAddress.localeCompare(b.senderAddress));
   }
 
   counts(scope?: MailboxScope): {
@@ -410,6 +499,7 @@ export class StateStore {
       ...this.classifications.values(),
       ...this.reports.values(),
       ...this.legacyReports,
+      ...this.spamReviews.values(),
     ].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
   }
 }

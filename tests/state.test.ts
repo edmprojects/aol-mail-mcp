@@ -44,6 +44,40 @@ test("persists classifications and scopes them by UIDVALIDITY", async () => {
     false,
   );
   assert.equal(reloaded.candidates(scope).length, 1);
+  assert.equal(reloaded.candidates(scope)[0]?.messageId, message.messageId);
+});
+
+test("suggests exact sender filters while exposing mixed classification evidence", async () => {
+  const { store } = await createStore();
+  await store.saveClassifications(scope, [
+    { message, label: "spam", confidence: 1, reason: "Spam" },
+    { message: { ...message, uid: 101 }, label: "spam", confidence: 1, reason: "Spam" },
+    { message: { ...message, uid: 102 }, label: "not_spam", confidence: 1, reason: "Account mail" },
+  ]);
+  assert.deepEqual(store.filterRecommendations(scope, 2), [{
+    senderAddress: "sender@example.com",
+    spamCount: 2,
+    otherCount: 1,
+    exampleSubjects: ["Subject"],
+  }]);
+});
+
+test("filter suggestions ignore other accounts and older UIDVALIDITY", async () => {
+  const { store } = await createStore();
+  const otherAccount = { ...scope, accountId: "other-account" };
+  const oldMailbox = { ...scope, uidValidity: "9" };
+  await store.saveClassifications(otherAccount, [
+    { message, label: "spam", confidence: 1, reason: "Other account" },
+  ]);
+  await store.saveClassifications(oldMailbox, [
+    { message, label: "spam", confidence: 1, reason: "Old mailbox" },
+  ]);
+  await store.saveClassifications(scope, [
+    { message, label: "spam", confidence: 1, reason: "Current mailbox" },
+  ]);
+
+  assert.deepEqual(store.filterRecommendations(scope, 2), []);
+  assert.equal(store.filterRecommendations(scope, 1)[0]?.spamCount, 1);
 });
 
 test("reported results are idempotent and remove pending candidates", async () => {

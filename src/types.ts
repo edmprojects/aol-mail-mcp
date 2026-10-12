@@ -53,6 +53,7 @@ export interface AttachmentMetadata {
 export interface MessageDetails extends MessageSummary {
   attachments: AttachmentMetadata[];
   sourceTruncated: boolean | null;
+  unsubscribe: { mailto: string[]; urls: string[]; oneClick: boolean };
 }
 
 export type ResearchKind = "receipt" | "migration";
@@ -127,12 +128,24 @@ export interface LegacyReportEvent {
   reason: string;
 }
 
-export type ActionEvent = ClassificationEvent | ReportEvent | LegacyReportEvent;
+export interface SpamReviewEvent {
+  type: "spam_review";
+  eventId: string;
+  recordedAt: string;
+  key: string;
+  scope: MailboxScope;
+  message: MessageSummary;
+  verdict: "spam" | "false_positive" | "uncertain";
+  note: string;
+}
+
+export type ActionEvent = ClassificationEvent | ReportEvent | LegacyReportEvent | SpamReviewEvent;
 export type StateEvent = ActionEvent | ResearchRecord;
 
 export interface Candidate {
   key: string;
   uid: number;
+  messageId: string;
   sender: string;
   senderAddress: string;
   subject: string;

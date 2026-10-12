@@ -10,6 +10,7 @@ import type { MailboxScope, MailSearch, MessageSummary } from "../src/types.js";
 
 class FakeGateway implements MailGateway {
   async listMailboxes() { return ["INBOX", "Archive"]; }
+  async listMailboxDetails() { return [{ path: "INBOX", specialUse: null, specialUseSource: null }]; }
   scope: MailboxScope = {
     accountId: "account123",
     mailbox: "INBOX",
@@ -34,16 +35,35 @@ class FakeGateway implements MailGateway {
     return { ...result, scope: { ...this.scope, mailbox: query.mailbox } };
   }
 
+  async listRecent(mailbox: string, limit: number, beforeUid?: number) {
+    const uids = [105, 104, 103].filter((uid) => beforeUid === undefined || uid < beforeUid).slice(0, limit);
+    return {
+      scope: { ...this.scope, mailbox },
+      messages: (await this.fetchUnreadMany(uids, 500)).messages,
+      nextBeforeUid: uids.at(-1) ?? null,
+    };
+  }
+
+  async findMessageId(mailbox: string, messageId: string) {
+    const uid = Number(messageId.match(/^<(\d+)@/)?.[1]);
+    return {
+      scope: { ...this.scope, mailbox },
+      messages: Number.isInteger(uid) && mailbox !== "INBOX"
+        ? (await this.fetchUnreadMany([uid], 500)).messages : [],
+    };
+  }
+
   async fetchMessageDetails(uid: number, mailbox?: string) {
     const fetched = await this.fetchMessage(uid, 12000);
     return {
       scope: { ...fetched.scope, mailbox: mailbox ?? "INBOX" },
-      message: { ...fetched.message, attachments: [], sourceTruncated: false },
+      message: { ...fetched.message, attachments: [], sourceTruncated: false, unsubscribe: { mailto: [], urls: [], oneClick: false } },
     };
   }
 
-  async fetchMessage(uid: number, previewLimit: number) {
-    return this.fetchUnread(uid, previewLimit);
+  async fetchMessage(uid: number, previewLimit: number, mailbox?: string) {
+    const fetched = await this.fetchUnread(uid, previewLimit);
+    return { ...fetched, scope: { ...fetched.scope, mailbox: mailbox ?? "INBOX" } };
   }
 
   async fetchUnread(uid: number, previewLimit: number) {
@@ -198,4 +218,33 @@ test("persists selected receipt and migration findings without altering the acti
   const secondPage = await service.listResearchRecords(undefined, 1, 1);
   assert.equal((secondPage.records as unknown[]).length, 1);
   assert.equal(secondPage.nextOffset, null);
+});
+
+test("refreshes exact spam candidates and checks location without recording a native report", async () => {
+  const { service, state } = await createService();
+  await service.saveClassifications([{ uid: 105, label: "spam", confidence: 0.99, reason: "Unsolicited offer" }]);
+  const listed = await service.listSpamCandidates();
+  const key = (listed.candidates as Array<{ key: string }>)[0]!.key;
+  const prepared = await service.prepareSpamReports([key]);
+  assert.equal((prepared.candidates as Array<{ ready: boolean }>)[0]?.ready, true);
+  const checked = await service.verifySpamReports([key], "Spam");
+  assert.equal((checked.results as Array<{ verified: boolean }>)[0]?.verified, true);
+  assert.equal(state.counts().reported, 0);
+  await assert.rejects(service.verifySpamReports([key], "INBOX"), /Spam mailbox/);
+});
+
+test("groups bounded recent senders and reviews reported matches", async () => {
+  const { service } = await createService();
+  const groups = await service.senderGroups("INBOX", 2);
+  assert.equal(groups.sampled, 2);
+  assert.equal((groups.groups as unknown[]).length, 2);
+  await service.saveClassifications([{ uid: 105, label: "spam", confidence: 1, reason: "Spam" }]);
+  const key = ((await service.listSpamCandidates()).candidates as Array<{ key: string }>)[0]!.key;
+  await service.recordReportResults([{ key, status: "reported", detail: "Observed Webmail Spam action" }]);
+  const review = await service.reviewSpamFolder("Spam", 2);
+  assert.equal((review.messages as Array<{ locallyReported: boolean }>)[0]?.locallyReported, true);
+  await service.saveSpamReview("Spam", 105, "false_positive", "Looks like an account notice");
+  const reviewed = await service.reviewSpamFolder("Spam", 2);
+  assert.equal((reviewed.messages as Array<{ review: string }>)[0]?.review, "false_positive");
+  await assert.rejects(service.saveSpamReview("INBOX", 105, "spam", ""), /Spam folder/);
 });

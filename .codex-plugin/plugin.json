@@ -1,6 +1,6 @@
 {
   "name": "aol-mail",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Search AOL mail folders, inspect receipt evidence, track account migrations, and safely triage unread Inbox messages.",
   "author": {
     "name": "AOL Mail Contributors"
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "AOL Mail",
     "shortDescription": "Review unread AOL mail safely with Codex.",
-    "longDescription": "Read-only AOL folder search, receipt and migration findings, resumable Inbox classifications, and approval-gated Report Spam logging.",
+    "longDescription": "Read-only AOL folder search, Spam review, sender and unsubscribe research, migration findings, and Webmail report verification.",
     "developerName": "AOL Mail Contributors",
     "category": "Productivity",
     "capabilities": [

@@ -14,6 +14,7 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
   const directory = await mkdtemp(join(tmpdir(), "aol-mcp-"));
   const gateway: MailGateway = {
     async listMailboxes() { return ["INBOX", "Archive"]; },
+    async listMailboxDetails() { return []; },
     async snapshot() {
       return {
         scope: { accountId: "account", mailbox: "INBOX", uidValidity: "1" },
@@ -30,6 +31,12 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
       throw new Error("not expected");
     },
     async searchMailbox() {
+      throw new Error("not expected");
+    },
+    async listRecent() {
+      throw new Error("not expected");
+    },
+    async findMessageId() {
       throw new Error("not expected");
     },
     async fetchMessage() {
@@ -63,16 +70,23 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
         "get_mailbox_status",
         "get_message",
         "get_message_details",
+        "group_recent_senders",
+        "list_mailbox_details",
         "list_mailboxes",
         "list_research_records",
         "list_spam_candidates",
         "list_unread",
+        "prepare_spam_reports",
+        "recommend_filters",
         "record_report_results",
+        "review_spam_folder",
         "save_classifications",
         "save_research_record",
+        "save_spam_review",
         "search_across_mailboxes",
         "search_messages",
         "update_migration_status",
+        "verify_spam_reports",
       ],
     );
     const searchTool = tools.tools.find((tool) => tool.name === "search_messages");
