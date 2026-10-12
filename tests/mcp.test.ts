@@ -29,7 +29,13 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
     async searchMessages() {
       throw new Error("not expected");
     },
+    async searchMailbox() {
+      throw new Error("not expected");
+    },
     async fetchMessage() {
+      throw new Error("not expected");
+    },
+    async fetchMessageDetails() {
       throw new Error("not expected");
     },
   };
@@ -56,12 +62,17 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
         "get_any_message",
         "get_mailbox_status",
         "get_message",
+        "get_message_details",
         "list_mailboxes",
+        "list_research_records",
         "list_spam_candidates",
         "list_unread",
         "record_report_results",
         "save_classifications",
+        "save_research_record",
+        "search_across_mailboxes",
         "search_messages",
+        "update_migration_status",
       ],
     );
     const searchTool = tools.tools.find((tool) => tool.name === "search_messages");

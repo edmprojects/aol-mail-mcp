@@ -1,7 +1,7 @@
 import { ImapFlow } from "imapflow";
 import { accountIdentifier, loadConfig, loadKeychainPassword } from "./config.js";
 import { parseMessage } from "./message.js";
-import type { MailboxScope, MailSearch, MessageSummary } from "./types.js";
+import type { MailboxScope, MailSearch, MailCriteriaSearch, MessageDetails, MessageSummary, AttachmentMetadata } from "./types.js";
 
 export interface MailboxSnapshot {
   scope: MailboxScope;
@@ -15,6 +15,15 @@ export interface MailGateway {
     scope: MailboxScope;
     messages: MessageSummary[];
     nextBeforeUid: number | null;
+  }>;
+  searchMailbox(query: MailCriteriaSearch): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
+    nextBeforeUid: number | null;
+  }>;
+  fetchMessageDetails(uid: number, mailbox?: string): Promise<{
+    scope: MailboxScope;
+    message: MessageDetails;
   }>;
   fetchMessage(uid: number, previewLimit: number, mailbox?: string): Promise<{
     scope: MailboxScope;
@@ -51,11 +60,33 @@ interface ReadOnlyImapClient {
   ): Promise<number[] | false>;
   fetchOne(
     uid: number,
-    query: { source: { start: number; maxLength: number }; uid: boolean },
+    query: { source: { start: number; maxLength: number }; uid: boolean; bodyStructure?: boolean; size?: boolean },
     options: { uid: boolean },
-  ): Promise<{ source?: Buffer } | false>;
+  ): Promise<{ source?: Buffer; size?: number; bodyStructure?: MailStructure } | false>;
   logout(): Promise<void>;
   close(): void;
+}
+
+interface MailStructure {
+  type: string;
+  size?: number;
+  disposition?: string;
+  dispositionParameters?: Record<string, string>;
+  parameters?: Record<string, string>;
+  childNodes?: MailStructure[];
+}
+
+function attachmentMetadata(structure?: MailStructure): AttachmentMetadata[] {
+  if (!structure) return [];
+  const children = structure.childNodes?.flatMap(attachmentMetadata) ?? [];
+  const filename = structure.dispositionParameters?.filename ?? structure.parameters?.name;
+  if (!filename && structure.disposition?.toLowerCase() !== "attachment") return children;
+  return [{
+    filename: filename ?? "",
+    contentType: structure.type,
+    size: structure.size ?? null,
+    disposition: structure.disposition ?? "",
+  }, ...children];
 }
 
 interface GatewayDependencies {
@@ -156,6 +187,21 @@ export class AolImapGateway implements MailGateway {
     messages: MessageSummary[];
     nextBeforeUid: number | null;
   }> {
+    return this.searchMailbox({
+      mailbox: query.mailbox ?? "INBOX",
+      [query.field]: query.term,
+      since: query.since,
+      before: query.before,
+      beforeUid: query.beforeUid,
+      limit: query.limit,
+    });
+  }
+
+  async searchMailbox(query: MailCriteriaSearch): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
+    nextBeforeUid: number | null;
+  }> {
     return this.withMailbox(async (client, scope) => {
       if (query.beforeUid === 1) {
         return { scope, messages: [], nextBeforeUid: null };
@@ -163,7 +209,9 @@ export class AolImapGateway implements MailGateway {
       const result = await client.search(
         {
           ...(query.beforeUid && { uid: `1:${query.beforeUid - 1}` }),
-          [query.field]: query.term,
+          ...(query.from && { from: query.from }),
+          ...(query.subject && { subject: query.subject }),
+          ...(query.text && { text: query.text }),
           ...(query.since && { since: query.since }),
           ...(query.before && { before: query.before }),
         },
@@ -175,6 +223,31 @@ export class AolImapGateway implements MailGateway {
       const messages = await this.fetchSources(client, uids, 500, 32768);
       return { scope, messages, nextBeforeUid: uids.at(-1) ?? null };
     }, query.mailbox);
+  }
+
+  async fetchMessageDetails(
+    uid: number,
+    mailbox?: string,
+  ): Promise<{ scope: MailboxScope; message: MessageDetails }> {
+    return this.withMailbox(async (client, scope) => {
+      const fetched = await client.fetchOne(
+        uid,
+        { source: { start: 0, maxLength: 262144 }, bodyStructure: true, size: true, uid: true },
+        { uid: true },
+      );
+      if (!fetched || !fetched.source) {
+        throw new Error(`UID ${uid} returned no message source.`);
+      }
+      const summary = await parseMessage(uid, fetched.source, 12000);
+      return {
+        scope,
+        message: {
+          ...summary,
+          attachments: attachmentMetadata(fetched.bodyStructure),
+          sourceTruncated: fetched.size === undefined ? null : fetched.size > fetched.source.length,
+        },
+      };
+    }, mailbox);
   }
 
   async fetchMessage(

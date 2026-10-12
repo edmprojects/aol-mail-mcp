@@ -29,6 +29,19 @@ class FakeGateway implements MailGateway {
     return { ...fetched, nextBeforeUid: uids.at(-1) ?? null };
   }
 
+  async searchMailbox(query: { mailbox: string; limit: number }) {
+    const result = await this.searchMessages({ field: "subject", term: "Order", limit: query.limit });
+    return { ...result, scope: { ...this.scope, mailbox: query.mailbox } };
+  }
+
+  async fetchMessageDetails(uid: number, mailbox?: string) {
+    const fetched = await this.fetchMessage(uid, 12000);
+    return {
+      scope: { ...fetched.scope, mailbox: mailbox ?? "INBOX" },
+      message: { ...fetched.message, attachments: [], sourceTruncated: false },
+    };
+  }
+
   async fetchMessage(uid: number, previewLimit: number) {
     return this.fetchUnread(uid, previewLimit);
   }
@@ -117,4 +130,72 @@ test("search and exact reads do not depend on unread triage state", async () => 
   );
   assert.equal(results.nextBeforeUid, 104);
   assert.equal((exact.message as MessageSummary).uid, 105);
+});
+
+test("searches selected folders independently and reports a failed folder", async () => {
+  const { service, gateway } = await createService();
+  const searchMailbox = gateway.searchMailbox.bind(gateway);
+  gateway.searchMailbox = async (query) => {
+    if (query.mailbox === "Archive") throw new Error("Archive unavailable");
+    return searchMailbox(query);
+  };
+
+  const result = await service.searchAcrossMailboxes({
+    mailboxes: ["INBOX", "Archive"],
+    from: "rh.com",
+    subject: "Order",
+    limitPerMailbox: 2,
+  });
+
+  assert.deepEqual(
+    (result.results as Array<{ scope: MailboxScope }>).map((item) => item.scope.mailbox),
+    ["INBOX"],
+  );
+  assert.deepEqual(result.errors, [{ mailbox: "Archive", error: "Archive unavailable" }]);
+  await assert.rejects(
+    service.searchAcrossMailboxes({ mailboxes: ["INBOX"], limitPerMailbox: 1 }),
+    /At least one/,
+  );
+});
+
+test("persists selected receipt and migration findings without altering the action log", async () => {
+  const { service } = await createService();
+  await service.saveResearchRecord({
+    kind: "receipt", uid: 105, organization: "Restoration Hardware", note: "Cloud couch",
+    orderNumber: "RH-123", amount: "$100.00",
+  });
+  const savedMigration = await service.saveResearchRecord({
+    kind: "migration", uid: 104, organization: "Example account", note: "Change account email",
+    currentEmail: "old@example.com", targetEmail: "new@example.com",
+  });
+  const migration = await service.listResearchRecords("migration");
+  const records = migration.records as Array<{ status: string; scope: MailboxScope }>;
+  assert.equal(records.length, 1);
+  assert.equal(records[0]?.status, "to_review");
+  assert.equal(records[0]?.scope.uidValidity, "10");
+
+  const key = (savedMigration.record as { key: string }).key;
+  await service.updateMigrationStatus(key, "updated", "Updated externally");
+  await service.saveResearchRecord({
+    kind: "receipt", uid: 105, organization: "Restoration Hardware", note: "Check warranty",
+  });
+  await service.saveResearchRecord({
+    kind: "migration", uid: 104, organization: "Example account",
+    currentEmail: "old@example.com", targetEmail: "new@example.com",
+  });
+  const receipts = await service.listResearchRecords("receipt");
+  const receipt = (receipts.records as Array<{ orderNumber?: string; amount?: string; note: string }>)[0];
+  assert.equal(receipt?.orderNumber, "RH-123");
+  assert.equal(receipt?.amount, "$100.00");
+  assert.equal(receipt?.note, "Check warranty");
+  const updated = await service.listResearchRecords("migration");
+  assert.equal((updated.records as Array<{ status: string }>).length, 1);
+  assert.equal((updated.records as Array<{ status: string }>)[0]?.status, "updated");
+  assert.equal((updated.records as Array<{ note: string }>)[0]?.note, "Updated externally");
+  const firstPage = await service.listResearchRecords(undefined, 0, 1);
+  assert.equal(firstPage.total, 2);
+  assert.equal(firstPage.nextOffset, 1);
+  const secondPage = await service.listResearchRecords(undefined, 1, 1);
+  assert.equal((secondPage.records as unknown[]).length, 1);
+  assert.equal(secondPage.nextOffset, null);
 });

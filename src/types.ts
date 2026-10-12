@@ -21,6 +21,74 @@ export interface MailSearch {
   limit: number;
 }
 
+export interface MailCriteriaSearch {
+  mailbox: string;
+  from?: string;
+  subject?: string;
+  text?: string;
+  since?: string;
+  before?: string;
+  beforeUid?: number;
+  limit: number;
+}
+
+export interface MultiMailboxSearch {
+  mailboxes: string[];
+  from?: string;
+  subject?: string;
+  text?: string;
+  since?: string;
+  before?: string;
+  beforeUidByMailbox?: Record<string, number>;
+  limitPerMailbox: number;
+}
+
+export interface AttachmentMetadata {
+  filename: string;
+  contentType: string;
+  size: number | null;
+  disposition: string;
+}
+
+export interface MessageDetails extends MessageSummary {
+  attachments: AttachmentMetadata[];
+  sourceTruncated: boolean | null;
+}
+
+export type ResearchKind = "receipt" | "migration";
+
+export interface ResearchInput {
+  kind: ResearchKind;
+  mailbox?: string;
+  uid: number;
+  organization: string;
+  note?: string;
+  orderNumber?: string;
+  orderDate?: string;
+  amount?: string;
+  currentEmail?: string;
+  targetEmail?: string;
+  status?: "to_review" | "updated" | "skipped";
+}
+
+export interface ResearchRecord {
+  type: "research_record";
+  eventId: string;
+  recordedAt: string;
+  key: string;
+  kind: ResearchKind;
+  scope: MailboxScope;
+  message: MessageSummary;
+  organization: string;
+  note: string;
+  orderNumber?: string;
+  orderDate?: string;
+  amount?: string;
+  currentEmail?: string;
+  targetEmail?: string;
+  status?: "to_review" | "updated" | "skipped";
+}
+
 export interface MailboxScope {
   accountId: string;
   mailbox: string;
@@ -59,7 +127,8 @@ export interface LegacyReportEvent {
   reason: string;
 }
 
-export type StateEvent = ClassificationEvent | ReportEvent | LegacyReportEvent;
+export type ActionEvent = ClassificationEvent | ReportEvent | LegacyReportEvent;
+export type StateEvent = ActionEvent | ResearchRecord;
 
 export interface Candidate {
   key: string;

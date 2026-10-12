@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { StateEvent } from "./types.js";
+import type { ActionEvent } from "./types.js";
 
 function csvCell(value: unknown): string {
   let text = value === undefined || value === null ? "" : String(value);
@@ -10,7 +10,7 @@ function csvCell(value: unknown): string {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
-function eventRow(event: StateEvent): Record<string, unknown> {
+function eventRow(event: ActionEvent): Record<string, unknown> {
   if (event.type === "classification") {
     return {
       event_type: event.type,
@@ -67,7 +67,7 @@ function eventRow(event: StateEvent): Record<string, unknown> {
 
 export async function exportEvents(
   directory: string,
-  events: StateEvent[],
+  events: ActionEvent[],
   format: "jsonl" | "csv",
 ): Promise<string> {
   const exportDirectory = join(directory, "exports");

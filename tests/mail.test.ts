@@ -116,7 +116,20 @@ test("searches read mail and fetches an exact message without changing flags", a
     },
     async fetchOne(uid: number, query: unknown, options: unknown) {
       calls.push({ name: "fetchOne", value: { uid, query, options } });
-      return { source };
+      return {
+        source,
+        size: source.length + 1000,
+        bodyStructure: {
+          type: "multipart/mixed",
+          childNodes: [
+            { type: "text/plain" },
+            {
+              type: "application/pdf", size: 2048, disposition: "attachment",
+              dispositionParameters: { filename: "receipt.pdf" },
+            },
+          ],
+        },
+      };
     },
     async logout() {},
     close() {},
@@ -158,9 +171,20 @@ test("searches read mail and fetches an exact message without changing flags", a
   const archived = await gateway.searchMessages({
     mailbox: "Archive", field: "subject", term: "Order", limit: 1,
   });
+  await gateway.searchMailbox({
+    mailbox: "Archive", from: "rh.com", subject: "Order", text: "Cloud", limit: 1,
+  });
+  assert.deepEqual(calls.filter((call) => call.name === "search").at(-1)?.value, {
+    from: "rh.com", subject: "Order", text: "Cloud",
+  });
   const archivedMessage = await gateway.fetchMessage(9, 12000, "Archive");
+  const details = await gateway.fetchMessageDetails(9, "Archive");
   assert.equal(archived.scope.mailbox, "Archive");
   assert.equal(archivedMessage.scope.mailbox, "Archive");
+  assert.deepEqual(details.message.attachments, [{
+    filename: "receipt.pdf", contentType: "application/pdf", size: 2048, disposition: "attachment",
+  }]);
+  assert.equal(details.message.sourceTruncated, true);
   assert.equal(
     (calls.filter((call) => call.name === "mailboxOpen").at(-1)?.value as { path: string }).path,
     "Archive",

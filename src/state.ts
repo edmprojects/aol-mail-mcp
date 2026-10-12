@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import type {
   Candidate,
+  ActionEvent,
   ClassificationEvent,
   ClassificationLabel,
   LegacyReportEvent,
@@ -11,6 +12,8 @@ import type {
   MessageSummary,
   ReportEvent,
   ReportStatus,
+  ResearchKind,
+  ResearchRecord,
   StateEvent,
 } from "./types.js";
 
@@ -24,6 +27,7 @@ export class StateStore {
   private readonly classifications = new Map<string, ClassificationEvent>();
   private readonly reports = new Map<string, ReportEvent>();
   private readonly legacyReports: LegacyReportEvent[] = [];
+  private readonly research = new Map<string, ResearchRecord>();
 
   constructor(private readonly path: string) {}
 
@@ -43,6 +47,7 @@ export class StateStore {
     this.classifications.clear();
     this.reports.clear();
     this.legacyReports.length = 0;
+    this.research.clear();
     let content = "";
     try {
       content = await readFile(this.path, "utf8");
@@ -175,6 +180,8 @@ export class StateStore {
       this.classifications.set(event.key, event);
     } else if (event.type === "report_result") {
       this.reports.set(event.key, event);
+    } else if (event.type === "research_record") {
+      this.research.set(event.key, event);
     } else if (
       !this.legacyReports.some((existing) => existing.eventId === event.eventId)
     ) {
@@ -267,6 +274,56 @@ export class StateStore {
     });
   }
 
+  async saveResearch(
+    record: Omit<ResearchRecord, "eventId" | "recordedAt" | "note"> & { note?: string },
+  ): Promise<ResearchRecord> {
+    return this.withLock(async () => {
+      await this.loadUnlocked();
+      const existing = this.research.get(record.key);
+      const event: ResearchRecord = {
+        ...existing,
+        ...record,
+        note: record.note ?? existing?.note ?? "",
+        ...(record.kind === "migration" && {
+          status: record.status ?? existing?.status ?? "to_review",
+        }),
+        eventId: randomUUID(),
+        recordedAt: new Date().toISOString(),
+      };
+      await this.appendUnlocked([event]);
+      return event;
+    });
+  }
+
+  async updateResearchStatus(
+    key: string,
+    status: "to_review" | "updated" | "skipped",
+    note: string,
+  ): Promise<ResearchRecord> {
+    return this.withLock(async () => {
+      await this.loadUnlocked();
+      const existing = this.research.get(key);
+      if (!existing || existing.kind !== "migration") {
+        throw new Error("Unknown migration record key.");
+      }
+      const event: ResearchRecord = {
+        ...existing,
+        status,
+        note,
+        eventId: randomUUID(),
+        recordedAt: new Date().toISOString(),
+      };
+      await this.appendUnlocked([event]);
+      return event;
+    });
+  }
+
+  researchRecords(kind?: ResearchKind): ResearchRecord[] {
+    return [...this.research.values()]
+      .filter((record) => !kind || record.kind === kind)
+      .sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  }
+
   candidates(
     scope: MailboxScope,
     beforeUid?: number,
@@ -348,7 +405,7 @@ export class StateStore {
     };
   }
 
-  allEvents(): StateEvent[] {
+  allEvents(): ActionEvent[] {
     return [
       ...this.classifications.values(),
       ...this.reports.values(),
