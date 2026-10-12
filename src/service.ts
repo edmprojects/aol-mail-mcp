@@ -65,8 +65,12 @@ export class AolMailService {
     return this.gateway.searchMessages(query);
   }
 
-  async getAnyMessage(uid: number): Promise<Record<string, unknown>> {
-    const fetched = await this.gateway.fetchMessage(uid, 12000);
+  async listMailboxes(): Promise<Record<string, unknown>> {
+    return { mailboxes: await this.gateway.listMailboxes() };
+  }
+
+  async getAnyMessage(uid: number, mailbox?: string): Promise<Record<string, unknown>> {
+    const fetched = await this.gateway.fetchMessage(uid, 12000, mailbox);
     return { scope: fetched.scope, message: fetched.message };
   }
 

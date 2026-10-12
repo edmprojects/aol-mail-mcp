@@ -9,6 +9,7 @@ import { StateStore } from "../src/state.js";
 import type { MailboxScope, MailSearch, MessageSummary } from "../src/types.js";
 
 class FakeGateway implements MailGateway {
+  async listMailboxes() { return ["INBOX", "Archive"]; }
   scope: MailboxScope = {
     accountId: "account123",
     mailbox: "INBOX",

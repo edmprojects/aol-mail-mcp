@@ -1,6 +1,6 @@
 # AOL Mail Codex plugin
 
-Local, read-only AOL IMAP tools for searching Inbox mail and triaging unread messages. Mail credentials and triage data stay outside this repository. The credential setup uses macOS Keychain, so this plugin currently requires macOS.
+Local, read-only AOL IMAP tools for searching mail folders and triaging unread Inbox messages. Mail credentials and triage data stay outside this repository. The credential setup uses macOS Keychain, so this plugin currently requires macOS.
 
 ## Development
 
@@ -23,4 +23,4 @@ The setup script stores the AOL address in the user's config directory and the a
 
 If the clone is already registered under a different marketplace name, refresh that installed copy with `codex plugin add aol-mail@<marketplace-name>`.
 
-`search_messages` searches read and unread Inbox mail using a required `field` (`from`, `subject`, or `text`) and `term`. `get_any_message` reads one exact Inbox UID. Both open IMAP read-only and preserve read state. Existing unread triage and approval-gated spam logging remain separate.
+`list_mailboxes` returns selectable folder paths. `search_messages` searches read and unread mail in one folder using a required `field` (`from`, `subject`, or `text`) and `term`; omit `mailbox` for Inbox. Use `beforeUid` to page older results in the same folder. `get_any_message` reads one exact UID in a chosen folder. All reads preserve read state. Existing unread Inbox triage and approval-gated spam logging remain separate.

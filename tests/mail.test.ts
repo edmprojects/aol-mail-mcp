@@ -11,6 +11,7 @@ test("opens INBOX read-only and fetches message source with peek-safe semantics"
     async connect() {
       calls.push({ name: "connect", value: null });
     },
+    async list() { return [{ path: "INBOX", flags: new Set<string>() }]; },
     async mailboxOpen(path: string, options: { readOnly: boolean }) {
       calls.push({ name: "mailboxOpen", value: { path, options } });
       return { readOnly: true, uidValidity: 77n };
@@ -68,6 +69,7 @@ test("redacts raw IMAP errors", async () => {
       async connect() {
         throw new Error("server echoed secret");
       },
+      async list() { return []; },
       async mailboxOpen() {
         return { readOnly: true, uidValidity: 1n };
       },
@@ -96,6 +98,14 @@ test("searches read mail and fetches an exact message without changing flags", a
   );
   const client = {
     async connect() {},
+    async list() {
+      calls.push({ name: "list", value: null });
+      return [
+        { path: "INBOX", flags: new Set<string>() },
+        { path: "Archive", flags: new Set<string>() },
+        { path: "Parent", flags: new Set(["\\Noselect"]) },
+      ];
+    },
     async mailboxOpen(path: string, options: { readOnly: boolean }) {
       calls.push({ name: "mailboxOpen", value: { path, options } });
       return { readOnly: true, uidValidity: 77n };
@@ -142,5 +152,25 @@ test("searches read mail and fetches an exact message without changing flags", a
       (call) => (call.value as { options: { readOnly: boolean } }).options.readOnly,
     ),
     true,
+  );
+
+  assert.deepEqual(await gateway.listMailboxes(), ["INBOX", "Archive"]);
+  const archived = await gateway.searchMessages({
+    mailbox: "Archive", field: "subject", term: "Order", limit: 1,
+  });
+  const archivedMessage = await gateway.fetchMessage(9, 12000, "Archive");
+  assert.equal(archived.scope.mailbox, "Archive");
+  assert.equal(archivedMessage.scope.mailbox, "Archive");
+  assert.equal(
+    (calls.filter((call) => call.name === "mailboxOpen").at(-1)?.value as { path: string }).path,
+    "Archive",
+  );
+  await assert.rejects(
+    gateway.fetchMessage(9, 12000, "Parent"),
+    /IMAP operation failed/,
+  );
+  await assert.rejects(
+    gateway.fetchMessage(9, 12000, "Missing"),
+    /IMAP operation failed/,
   );
 });

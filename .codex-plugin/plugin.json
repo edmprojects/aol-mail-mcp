@@ -1,7 +1,7 @@
 {
   "name": "aol-mail",
-  "version": "0.2.1",
-  "description": "Search AOL Inbox mail and safely triage unread messages through a local read-only MCP server.",
+  "version": "0.3.0",
+  "description": "Search AOL mail folders and safely triage unread Inbox messages through a local read-only MCP server.",
   "author": {
     "name": "AOL Mail Contributors"
   },
@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "AOL Mail",
     "shortDescription": "Review unread AOL mail safely with Codex.",
-    "longDescription": "Read-only AOL inbox access, resumable Codex classifications, and approval-gated Report Spam logging.",
+    "longDescription": "Read-only AOL folder search, resumable Inbox classifications, and approval-gated Report Spam logging.",
     "developerName": "AOL Mail Contributors",
     "category": "Productivity",
     "capabilities": [

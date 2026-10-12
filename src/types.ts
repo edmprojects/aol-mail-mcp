@@ -12,6 +12,7 @@ export interface MessageSummary {
 }
 
 export interface MailSearch {
+  mailbox?: string;
   field: "from" | "subject" | "text";
   term: string;
   since?: string;
@@ -22,7 +23,7 @@ export interface MailSearch {
 
 export interface MailboxScope {
   accountId: string;
-  mailbox: "INBOX";
+  mailbox: string;
   uidValidity: string;
 }
 

@@ -13,6 +13,7 @@ import { StateStore } from "../src/state.js";
 test("lists the complete tool surface and rejects oversized inputs", async () => {
   const directory = await mkdtemp(join(tmpdir(), "aol-mcp-"));
   const gateway: MailGateway = {
+    async listMailboxes() { return ["INBOX", "Archive"]; },
     async snapshot() {
       return {
         scope: { accountId: "account", mailbox: "INBOX", uidValidity: "1" },
@@ -55,6 +56,7 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
         "get_any_message",
         "get_mailbox_status",
         "get_message",
+        "list_mailboxes",
         "list_spam_candidates",
         "list_unread",
         "record_report_results",

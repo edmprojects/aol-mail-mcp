@@ -8,11 +8,11 @@ description: Review and classify unread AOL Inbox messages through the aol-mail 
 Use the `aol-mail` MCP to inspect unread messages. The MCP is read-only; perform
 approved Report Spam actions only through AOL Webmail with browser control.
 
-For lookup requests, use `search_messages` with `field` (`from`, `subject`, or
-`text`) and `term` to find read or unread Inbox mail, then `get_any_message`
-for an exact UID. Search and exact reads do not classify mail or change read
-state. The search covers Inbox
-only; use AOL Webmail for other folders or a direct Webmail message link.
+For lookup requests, call `list_mailboxes` to find the relevant folder, then
+use `search_messages` with `field` (`from`, `subject`, or `text`), `term`, and
+optional `mailbox` to find read or unread mail. Use `get_any_message` with the
+same folder and an exact UID. Omit `mailbox` for Inbox. Search and exact reads
+do not classify mail or change read state.
 
 ## Safety Rules
 

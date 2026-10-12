@@ -9,13 +9,14 @@ export interface MailboxSnapshot {
 }
 
 export interface MailGateway {
+  listMailboxes(): Promise<string[]>;
   snapshot(): Promise<MailboxSnapshot>;
   searchMessages(query: MailSearch): Promise<{
     scope: MailboxScope;
     messages: MessageSummary[];
     nextBeforeUid: number | null;
   }>;
-  fetchMessage(uid: number, previewLimit: number): Promise<{
+  fetchMessage(uid: number, previewLimit: number, mailbox?: string): Promise<{
     scope: MailboxScope;
     message: MessageSummary;
   }>;
@@ -31,6 +32,7 @@ export interface MailGateway {
 
 interface ReadOnlyImapClient {
   connect(): Promise<void>;
+  list(): Promise<Array<{ path: string; flags: Set<string> }>>;
   mailboxOpen(
     path: string,
     options: { readOnly: boolean },
@@ -80,6 +82,7 @@ export class AolImapGateway implements MailGateway {
 
   private async withMailbox<T>(
     operation: (client: ReadOnlyImapClient, scope: MailboxScope) => Promise<T>,
+    mailboxPath = "INBOX",
   ): Promise<T> {
     const { account } = await this.dependencies.loadAccount();
     const password = await this.dependencies.loadPassword(account);
@@ -87,13 +90,20 @@ export class AolImapGateway implements MailGateway {
 
     try {
       await client.connect();
-      const mailbox = await client.mailboxOpen("INBOX", { readOnly: true });
+      if (mailboxPath !== "INBOX") {
+        const folders = await client.list();
+        const selected = folders.find((folder) => folder.path === mailboxPath);
+        if (!selected || selected.flags.has("\\Noselect")) {
+          throw new Error("Mailbox is unavailable or cannot be selected.");
+        }
+      }
+      const mailbox = await client.mailboxOpen(mailboxPath, { readOnly: true });
       if (!mailbox.readOnly) {
         throw new Error("server did not confirm read-only mode");
       }
       const scope: MailboxScope = {
         accountId: accountIdentifier(account),
-        mailbox: "INBOX",
+        mailbox: mailboxPath,
         uidValidity: mailbox.uidValidity.toString(),
       };
       return await operation(client, scope);
@@ -101,6 +111,27 @@ export class AolImapGateway implements MailGateway {
       throw new Error(
         "AOL IMAP operation failed. Verify the app password and account configuration.",
       );
+    } finally {
+      try {
+        await client.logout();
+      } catch {
+        client.close();
+      }
+    }
+  }
+
+  async listMailboxes(): Promise<string[]> {
+    const { account } = await this.dependencies.loadAccount();
+    const password = await this.dependencies.loadPassword(account);
+    const client = this.dependencies.createClient(account, password);
+    try {
+      await client.connect();
+      const folders = await client.list();
+      return folders
+        .filter((folder) => !folder.flags.has("\\Noselect"))
+        .map((folder) => folder.path);
+    } catch {
+      throw new Error("AOL IMAP operation failed. Verify the app password and account configuration.");
     } finally {
       try {
         await client.logout();
@@ -143,17 +174,18 @@ export class AolImapGateway implements MailGateway {
         .slice(0, query.limit);
       const messages = await this.fetchSources(client, uids, 500, 32768);
       return { scope, messages, nextBeforeUid: uids.at(-1) ?? null };
-    });
+    }, query.mailbox);
   }
 
   async fetchMessage(
     uid: number,
     previewLimit: number,
+    mailbox?: string,
   ): Promise<{ scope: MailboxScope; message: MessageSummary }> {
     return this.withMailbox(async (client, scope) => {
       const messages = await this.fetchSources(client, [uid], previewLimit, 262144);
       return { scope, message: messages[0]! };
-    });
+    }, mailbox);
   }
 
   async fetchUnread(
