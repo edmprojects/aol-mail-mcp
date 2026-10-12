@@ -25,6 +25,12 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
     async fetchUnreadMany() {
       throw new Error("not expected");
     },
+    async searchMessages() {
+      throw new Error("not expected");
+    },
+    async fetchMessage() {
+      throw new Error("not expected");
+    },
   };
   const service = new AolMailService(
     gateway,
@@ -46,20 +52,30 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
       tools.tools.map((tool) => tool.name).sort(),
       [
         "export_action_log",
+        "get_any_message",
         "get_mailbox_status",
         "get_message",
         "list_spam_candidates",
         "list_unread",
         "record_report_results",
         "save_classifications",
+        "search_messages",
       ],
     );
+    const searchTool = tools.tools.find((tool) => tool.name === "search_messages");
+    assert.deepEqual(searchTool?.inputSchema.required?.sort(), ["field", "term"]);
 
     const invalid = await client.callTool({
       name: "list_unread",
       arguments: { limit: 51 },
     });
     assert.equal(invalid.isError, true);
+
+    const unbounded = await client.callTool({
+      name: "search_messages",
+      arguments: { limit: 25 },
+    });
+    assert.equal(unbounded.isError, true);
   } finally {
     await client.close();
     await server.close();

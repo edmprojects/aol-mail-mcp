@@ -11,6 +11,15 @@ export interface MessageSummary {
   preview: string;
 }
 
+export interface MailSearch {
+  field: "from" | "subject" | "text";
+  term: string;
+  since?: string;
+  before?: string;
+  beforeUid?: number;
+  limit: number;
+}
+
 export interface MailboxScope {
   accountId: string;
   mailbox: "INBOX";

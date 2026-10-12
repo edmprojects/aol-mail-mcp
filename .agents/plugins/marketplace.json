@@ -1,0 +1,12 @@
+{
+  "name": "aol-mail-local",
+  "plugins": [
+    {
+      "name": "aol-mail",
+      "source": {
+        "source": "local",
+        "path": "."
+      }
+    }
+  ]
+}

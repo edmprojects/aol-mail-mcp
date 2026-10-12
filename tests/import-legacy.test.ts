@@ -14,4 +14,5 @@ test("parses quoted legacy rows with commas and stable identities", () => {
   assert.equal(first[0]?.subject, "Offer, today");
   assert.equal(first[0]?.eventId, second[0]?.eventId);
   assert.equal(first[0]?.source, "legacy_ui_log");
+  assert.equal(first[0]?.recordedAt, "2026-07-29T00:00:00.000Z");
 });

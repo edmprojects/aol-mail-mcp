@@ -1,7 +1,7 @@
 import { ImapFlow } from "imapflow";
 import { accountIdentifier, loadConfig, loadKeychainPassword } from "./config.js";
 import { parseMessage } from "./message.js";
-import type { MailboxScope, MessageSummary } from "./types.js";
+import type { MailboxScope, MailSearch, MessageSummary } from "./types.js";
 
 export interface MailboxSnapshot {
   scope: MailboxScope;
@@ -10,6 +10,15 @@ export interface MailboxSnapshot {
 
 export interface MailGateway {
   snapshot(): Promise<MailboxSnapshot>;
+  searchMessages(query: MailSearch): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
+    nextBeforeUid: number | null;
+  }>;
+  fetchMessage(uid: number, previewLimit: number): Promise<{
+    scope: MailboxScope;
+    message: MessageSummary;
+  }>;
   fetchUnread(uid: number, previewLimit: number): Promise<{
     scope: MailboxScope;
     message: MessageSummary;
@@ -27,7 +36,15 @@ interface ReadOnlyImapClient {
     options: { readOnly: boolean },
   ): Promise<{ readOnly?: boolean; uidValidity: bigint }>;
   search(
-    query: { uid?: string; seen: boolean },
+    query: {
+      uid?: string;
+      seen?: boolean;
+      from?: string;
+      subject?: string;
+      text?: string;
+      since?: string;
+      before?: string;
+    },
     options: { uid: boolean },
   ): Promise<number[] | false>;
   fetchOne(
@@ -103,6 +120,42 @@ export class AolImapGateway implements MailGateway {
     });
   }
 
+  async searchMessages(query: MailSearch): Promise<{
+    scope: MailboxScope;
+    messages: MessageSummary[];
+    nextBeforeUid: number | null;
+  }> {
+    return this.withMailbox(async (client, scope) => {
+      if (query.beforeUid === 1) {
+        return { scope, messages: [], nextBeforeUid: null };
+      }
+      const result = await client.search(
+        {
+          ...(query.beforeUid && { uid: `1:${query.beforeUid - 1}` }),
+          [query.field]: query.term,
+          ...(query.since && { since: query.since }),
+          ...(query.before && { before: query.before }),
+        },
+        { uid: true },
+      );
+      const uids = (result === false ? [] : result)
+        .sort((a, b) => b - a)
+        .slice(0, query.limit);
+      const messages = await this.fetchSources(client, uids, 500, 32768);
+      return { scope, messages, nextBeforeUid: uids.at(-1) ?? null };
+    });
+  }
+
+  async fetchMessage(
+    uid: number,
+    previewLimit: number,
+  ): Promise<{ scope: MailboxScope; message: MessageSummary }> {
+    return this.withMailbox(async (client, scope) => {
+      const messages = await this.fetchSources(client, [uid], previewLimit, 262144);
+      return { scope, message: messages[0]! };
+    });
+  }
+
   async fetchUnread(
     uid: number,
     previewLimit: number,
@@ -130,19 +183,29 @@ export class AolImapGateway implements MailGateway {
         throw new Error(`UIDs are not unread Inbox messages: ${unknown.join(", ")}`);
       }
 
-      const messages: MessageSummary[] = [];
-      for (const uid of uids) {
-        const fetched = await client.fetchOne(
-          uid,
-          { source: { start: 0, maxLength: 32768 }, uid: true },
-          { uid: true },
-        );
-        if (!fetched || !fetched.source) {
-          throw new Error(`UID ${uid} returned no message source.`);
-        }
-        messages.push(await parseMessage(uid, fetched.source, previewLimit));
-      }
+      const messages = await this.fetchSources(client, uids, previewLimit, 32768);
       return { scope, messages };
     });
+  }
+
+  private async fetchSources(
+    client: ReadOnlyImapClient,
+    uids: number[],
+    previewLimit: number,
+    sourceLimit: number,
+  ): Promise<MessageSummary[]> {
+    const messages: MessageSummary[] = [];
+    for (const uid of uids) {
+      const fetched = await client.fetchOne(
+        uid,
+        { source: { start: 0, maxLength: sourceLimit }, uid: true },
+        { uid: true },
+      );
+      if (!fetched || !fetched.source) {
+        throw new Error(`UID ${uid} returned no message source.`);
+      }
+      messages.push(await parseMessage(uid, fetched.source, previewLimit));
+    }
+    return messages;
   }
 }

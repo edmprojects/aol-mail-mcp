@@ -6,7 +6,7 @@ import test from "node:test";
 import type { MailGateway, MailboxSnapshot } from "../src/mail.js";
 import { AolMailService } from "../src/service.js";
 import { StateStore } from "../src/state.js";
-import type { MailboxScope, MessageSummary } from "../src/types.js";
+import type { MailboxScope, MailSearch, MessageSummary } from "../src/types.js";
 
 class FakeGateway implements MailGateway {
   scope: MailboxScope = {
@@ -18,6 +18,18 @@ class FakeGateway implements MailGateway {
 
   async snapshot(): Promise<MailboxSnapshot> {
     return { scope: this.scope, unreadUids: this.unreadUids };
+  }
+
+  async searchMessages(query: MailSearch) {
+    const uids = [105, 104, 103].filter(
+      (uid) => query.beforeUid === undefined || uid < query.beforeUid,
+    ).slice(0, query.limit);
+    const fetched = await this.fetchUnreadMany(uids, 500);
+    return { ...fetched, nextBeforeUid: uids.at(-1) ?? null };
+  }
+
+  async fetchMessage(uid: number, previewLimit: number) {
+    return this.fetchUnread(uid, previewLimit);
   }
 
   async fetchUnread(uid: number, previewLimit: number) {
@@ -89,4 +101,19 @@ test("handles an empty unread mailbox", async () => {
 
   assert.deepEqual(result.messages, []);
   assert.equal(result.nextBeforeUid, null);
+});
+
+test("search and exact reads do not depend on unread triage state", async () => {
+  const { service, gateway } = await createService();
+  gateway.unreadUids = [];
+
+  const results = await service.searchMessages({ field: "from", term: "rh.com", limit: 2 });
+  const exact = await service.getAnyMessage(105);
+
+  assert.deepEqual(
+    (results.messages as MessageSummary[]).map((message) => message.uid),
+    [105, 104],
+  );
+  assert.equal(results.nextBeforeUid, 104);
+  assert.equal((exact.message as MessageSummary).uid, 105);
 });

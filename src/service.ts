@@ -4,6 +4,7 @@ import type { MailGateway } from "./mail.js";
 import { StateStore } from "./state.js";
 import type {
   ClassificationLabel,
+  MailSearch,
   ReportStatus,
 } from "./types.js";
 
@@ -57,6 +58,15 @@ export class AolMailService {
 
   async getMessage(uid: number): Promise<Record<string, unknown>> {
     const fetched = await this.gateway.fetchUnread(uid, 2000);
+    return { scope: fetched.scope, message: fetched.message };
+  }
+
+  async searchMessages(query: MailSearch): Promise<Record<string, unknown>> {
+    return this.gateway.searchMessages(query);
+  }
+
+  async getAnyMessage(uid: number): Promise<Record<string, unknown>> {
+    const fetched = await this.gateway.fetchMessage(uid, 12000);
     return { scope: fetched.scope, message: fetched.message };
   }
 

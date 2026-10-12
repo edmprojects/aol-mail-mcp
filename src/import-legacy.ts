@@ -58,7 +58,7 @@ export function legacyEvents(content: string): LegacyReportEvent[] {
       return {
         type: "legacy_report",
         eventId: `legacy-${createHash("sha256").update(identity).digest("hex").slice(0, 24)}`,
-        recordedAt: new Date(`${value("moved_at")}T00:00:00-07:00`).toISOString(),
+        recordedAt: new Date(`${value("moved_at")}T00:00:00Z`).toISOString(),
         source: "legacy_ui_log",
         messageDate: value("message_date"),
         sender: value("sender"),

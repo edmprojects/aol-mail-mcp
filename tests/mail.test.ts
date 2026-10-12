@@ -88,3 +88,59 @@ test("redacts raw IMAP errors", async () => {
     return true;
   });
 });
+
+test("searches read mail and fetches an exact message without changing flags", async () => {
+  const calls: Array<{ name: string; value: unknown }> = [];
+  const source = Buffer.from(
+    "From: clientservices@rh.com\r\nSubject: Order Confirmation\r\nContent-Type: text/plain\r\n\r\nCloud couch order",
+  );
+  const client = {
+    async connect() {},
+    async mailboxOpen(path: string, options: { readOnly: boolean }) {
+      calls.push({ name: "mailboxOpen", value: { path, options } });
+      return { readOnly: true, uidValidity: 77n };
+    },
+    async search(query: unknown) {
+      calls.push({ name: "search", value: query });
+      return [8, 9];
+    },
+    async fetchOne(uid: number, query: unknown, options: unknown) {
+      calls.push({ name: "fetchOne", value: { uid, query, options } });
+      return { source };
+    },
+    async logout() {},
+    close() {},
+  };
+  const gateway = new AolImapGateway({
+    loadAccount: async () => ({ account: "old@example.com" }),
+    loadPassword: async () => "secret",
+    createClient: () => client,
+  });
+
+  const search = await gateway.searchMessages({ field: "text", term: "Cloud", limit: 1, beforeUid: 10 });
+  const exhausted = await gateway.searchMessages({ field: "text", term: "Cloud", limit: 1, beforeUid: 1 });
+  const exact = await gateway.fetchMessage(9, 12000);
+
+  assert.deepEqual(search.messages.map((message) => message.uid), [9]);
+  assert.equal(search.nextBeforeUid, 9);
+  assert.deepEqual(exhausted.messages, []);
+  assert.match(exact.message.preview, /Cloud couch order/);
+  assert.deepEqual(calls.find((call) => call.name === "search")?.value, {
+    uid: "1:9",
+    text: "Cloud",
+  });
+  assert.deepEqual(
+    calls.filter((call) => call.name === "fetchOne").at(-1)?.value,
+    {
+      uid: 9,
+      query: { source: { start: 0, maxLength: 262144 }, uid: true },
+      options: { uid: true },
+    },
+  );
+  assert.equal(
+    calls.filter((call) => call.name === "mailboxOpen").every(
+      (call) => (call.value as { options: { readOnly: boolean } }).options.readOnly,
+    ),
+    true,
+  );
+});
