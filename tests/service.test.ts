@@ -83,6 +83,10 @@ class FakeGateway implements MailGateway {
     }));
     return { scope: this.scope, messages };
   }
+
+  async fetchInboxMany(uids: number[], previewLimit: number) {
+    return this.fetchUnreadMany(uids.filter((uid) => uid <= 105), previewLimit);
+  }
 }
 
 async function createService(gateway = new FakeGateway()) {
@@ -107,6 +111,32 @@ test("paginates newest unread messages and enforces the cursor", async () => {
     (second.messages as MessageSummary[]).map((message) => message.uid),
     [103, 102],
   );
+});
+
+test("pages read and unread Inbox mail and rejects stale classification selections", async () => {
+  const { service, gateway } = await createService();
+  const first = await service.listInboxBatch("2025-08-01", "2026-12-31", undefined, 2);
+  assert.equal(first.scanned, 2);
+  assert.deepEqual((first.messages as MessageSummary[]).map((message) => message.uid), [105, 104]);
+  assert.equal(first.nextBeforeUid, 104);
+
+  await assert.rejects(service.saveClassifications([
+    { uid: 105, messageId: "<105@example.com>", label: "spam", confidence: 1, reason: "Offer" },
+  ], "old"), /UIDVALIDITY changed/);
+  await assert.rejects(service.saveClassifications([
+    { uid: 105, messageId: "<different@example.com>", label: "spam", confidence: 1, reason: "Offer" },
+  ], gateway.scope.uidValidity), /message 105 changed/);
+  await assert.rejects(service.saveClassifications([
+    { uid: 999, label: "spam", confidence: 1, reason: "Offer" },
+  ], gateway.scope.uidValidity), /message 999 changed/);
+
+  await service.saveClassifications([
+    { uid: 105, messageId: "<105@example.com>", label: "spam", confidence: 1, reason: "Offer" },
+  ], gateway.scope.uidValidity);
+  const again = await service.listInboxBatch("2025-08-01", "2026-12-31", undefined, 2);
+  assert.equal(again.scanned, 2);
+  assert.deepEqual((again.messages as MessageSummary[]).map((message) => message.uid), [104]);
+  await assert.rejects(service.listInboxBatch("2026-12-31", "2025-08-01", undefined, 2), /before must be later/);
 });
 
 test("excludes classified messages and reopens them after UIDVALIDITY changes", async () => {

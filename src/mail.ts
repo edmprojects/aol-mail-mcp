@@ -22,7 +22,7 @@ export interface MailGateway {
     messages: MessageSummary[];
     nextBeforeUid: number | null;
   }>;
-  listRecent(mailbox: string, limit: number, beforeUid?: number, since?: string): Promise<{
+  listRecent(mailbox: string, limit: number, beforeUid?: number, since?: string, before?: string): Promise<{
     scope: MailboxScope;
     messages: MessageSummary[];
     nextBeforeUid: number | null;
@@ -44,6 +44,10 @@ export interface MailGateway {
     message: MessageSummary;
   }>;
   fetchUnreadMany(
+    uids: number[],
+    previewLimit: number,
+  ): Promise<{ scope: MailboxScope; messages: MessageSummary[] }>;
+  fetchInboxMany(
     uids: number[],
     previewLimit: number,
   ): Promise<{ scope: MailboxScope; messages: MessageSummary[] }>;
@@ -217,7 +221,7 @@ export class AolImapGateway implements MailGateway {
     });
   }
 
-  async listRecent(mailbox: string, limit: number, beforeUid?: number, since?: string): Promise<{
+  async listRecent(mailbox: string, limit: number, beforeUid?: number, since?: string, before?: string): Promise<{
     scope: MailboxScope;
     messages: MessageSummary[];
     nextBeforeUid: number | null;
@@ -228,6 +232,7 @@ export class AolImapGateway implements MailGateway {
         all: true,
         ...(beforeUid && { uid: `1:${beforeUid - 1}` }),
         ...(since && { since }),
+        ...(before && { before }),
       }, { uid: true });
       const uids = (result === false ? [] : result).sort((a, b) => b - a).slice(0, limit);
       return {
@@ -345,6 +350,16 @@ export class AolImapGateway implements MailGateway {
       const messages = await this.fetchSources(client, uids, previewLimit, 32768);
       return { scope, messages };
     });
+  }
+
+  async fetchInboxMany(
+    uids: number[],
+    previewLimit: number,
+  ): Promise<{ scope: MailboxScope; messages: MessageSummary[] }> {
+    return this.withMailbox(async (client, scope) => ({
+      scope,
+      messages: await this.fetchSources(client, uids, previewLimit, 32768),
+    }));
   }
 
   private async fetchSources(

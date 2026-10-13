@@ -27,6 +27,9 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
     async fetchUnreadMany() {
       throw new Error("not expected");
     },
+    async fetchInboxMany() {
+      throw new Error("not expected");
+    },
     async searchMessages() {
       throw new Error("not expected");
     },
@@ -71,6 +74,7 @@ test("lists the complete tool surface and rejects oversized inputs", async () =>
         "get_message",
         "get_message_details",
         "group_recent_senders",
+        "list_inbox_batch",
         "list_mailbox_details",
         "list_mailboxes",
         "list_research_records",

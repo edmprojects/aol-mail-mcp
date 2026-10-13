@@ -59,6 +59,25 @@ export class AolMailService {
     };
   }
 
+  async listInboxBatch(
+    since: string,
+    before: string | undefined,
+    beforeUid: number | undefined,
+    limit: number,
+  ): Promise<Record<string, unknown>> {
+    if (before && before <= since) {
+      throw new Error("before must be later than since.");
+    }
+    const page = await this.gateway.listRecent("INBOX", limit, beforeUid, since, before);
+    await this.state.load();
+    return {
+      scope: page.scope,
+      scanned: page.messages.length,
+      messages: page.messages.filter((message) => !this.state.hasClassification(page.scope, message.uid)),
+      nextBeforeUid: page.nextBeforeUid,
+    };
+  }
+
   async getMessage(uid: number): Promise<Record<string, unknown>> {
     const fetched = await this.gateway.fetchUnread(uid, 2000);
     return { scope: fetched.scope, message: fetched.message };
@@ -212,20 +231,33 @@ export class AolMailService {
   async saveClassifications(
     decisions: Array<{
       uid: number;
+      messageId?: string;
       label: ClassificationLabel;
       confidence: number;
       reason: string;
     }>,
+    expectedUidValidity?: string,
   ): Promise<Record<string, unknown>> {
-    const fetched = await this.gateway.fetchUnreadMany(
+    const fetched = await this.gateway.fetchInboxMany(
       decisions.map((decision) => decision.uid),
       500,
     );
+    if (expectedUidValidity && fetched.scope.uidValidity !== expectedUidValidity) {
+      throw new Error("Inbox UIDVALIDITY changed; refresh the batch before classifying.");
+    }
     const byUid = new Map(fetched.messages.map((message) => [message.uid, message]));
+    for (const decision of decisions) {
+      const message = byUid.get(decision.uid);
+      if (!message || (decision.messageId !== undefined && message.messageId !== decision.messageId)) {
+        throw new Error(`Inbox message ${decision.uid} changed; refresh the batch before classifying.`);
+      }
+    }
     await this.state.saveClassifications(
       fetched.scope,
       decisions.map((decision) => ({
-        ...decision,
+        label: decision.label,
+        confidence: decision.confidence,
+        reason: decision.reason,
         message: byUid.get(decision.uid)!,
       })),
     );

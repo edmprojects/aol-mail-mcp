@@ -236,3 +236,31 @@ test("lists Spam identity and searches Message-ID in a read-only folder", async 
   assert.equal(calls.filter((call) => call.name === "open").every((call) =>
     (call.value as { options: { readOnly: boolean } }).options.readOnly), true);
 });
+
+test("pages a date-bounded Inbox and fetches read messages without changing flags", async () => {
+  const searches: unknown[] = [];
+  const gateway = new AolImapGateway({
+    loadAccount: async () => ({ account: "old@example.com" }),
+    loadPassword: async () => "secret",
+    createClient: () => ({
+      async connect() {},
+      async list() { return []; },
+      async mailboxOpen(_path: string, options: { readOnly: boolean }) {
+        assert.equal(options.readOnly, true);
+        return { readOnly: true, uidValidity: 7n };
+      },
+      async search(query: unknown) { searches.push(query); return [9]; },
+      async fetchOne() {
+        return { source: Buffer.from("Message-ID: <9@example.com>\r\nFrom: sender@example.com\r\n\r\nText") };
+      },
+      async logout() {},
+      close() {},
+    }),
+  });
+
+  const page = await gateway.listRecent("INBOX", 1, 10, "2025-08-01", "2026-08-01");
+  const fetched = await gateway.fetchInboxMany([9], 500);
+  assert.deepEqual(searches, [{ all: true, uid: "1:9", since: "2025-08-01", before: "2026-08-01" }]);
+  assert.equal(page.messages[0]?.uid, 9);
+  assert.equal(fetched.messages[0]?.messageId, "<9@example.com>");
+});
